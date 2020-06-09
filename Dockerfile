@@ -5,56 +5,44 @@ FROM ${BASE_IMAGE} AS zsh-setup
 
 # Pass in the username we will run as instead of root.
 ARG USERNAME=me
-ENV USERNAME=${USERNAME}
+ENV USERNAME=$(whoami)
+
+# We check to see if sudo is installed, and if not, install it. This simplifies using
+# in cases where we are not root, but do have sudo. This way the rest of the dockerfile
+# can just use sudo in both cases
+RUN if ! [ "$(command -v sudo)" ]; then \
+    echo "Sudo command isn't installed. Attempting to install. This may fail if we are not root." \
+    && apt-get update && apt-get install -y sudo && rm -rf /var/lib/apt/lists/* \
+    && echo "%sudo ALL=(ALL:ALL) NOPASSWD: ALL" >> /etc/sudoers;\
+fi
 
 # Make sure none of these things try to get all interactive on us.
 # See https://github.com/phusion/baseimage-docker/issues/58
 ENV DEBIAN_FRONTEND=noninteractive
-RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
+
+RUN echo 'debconf debconf/frontend select Noninteractive' | sudo debconf-set-selections
 
 # Important for many programs, including python, to work properly
-RUN apt-get update && apt-get install -y apt-utils locales && locale-gen en_US.UTF-8
+RUN sudo apt-get update && sudo apt-get install -y apt-utils locales && sudo rm -rf /var/lib/apt/lists/*
+RUN sudo locale-gen en_US.UTF-8
 ENV LANG=en_US.UTF-8
 ENV LANGUAGE=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
-RUN dpkg-reconfigure locales
+RUN sudo dpkg-reconfigure locales
 
-RUN apt-get update && apt-get install -y tzdata \
-    && echo "US/Eastern" | tee /etc/timezone \
-    && dpkg-reconfigure tzdata \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install the stuff needed to get things to function well out of the box
-RUN apt-get update && apt-get install -y \
-    man \
-    sudo \
-    lsb-release \
-    software-properties-common \
-    gnupg2 \
-    && rm -rf /var/lib/apt/lists/*
+RUN sudo apt-get update && sudo apt-get install -y tzdata \
+    && echo "US/Eastern" | sudo tee /etc/timezone \
+    && sudo dpkg-reconfigure tzdata \
+    && sudo rm -rf /var/lib/apt/lists/*
 
 # Install zsh and oh-my-zsh
-RUN apt-get update && apt-get install -y \
+RUN sudo apt-get update && sudo apt-get install -y \
     curl \
     git \
     zsh \
-    && rm -rf /var/lib/apt/lists/*
+    && sudo rm -rf /var/lib/apt/lists/*
 
-# Allow users with sudo permission to run sudo without password
-RUN echo "%sudo ALL=(ALL:ALL) NOPASSWD: ALL" >> /etc/sudoers
-
-# Set up user and group
-RUN echo "USERNAME: ${USERNAME}"
-RUN groupadd ${USERNAME} && \
-    useradd -m -r -s /usr/bin/zsh -g ${USERNAME} -G sudo ${USERNAME}
-RUN touch /home/${USERNAME}/.zshrc
-USER ${USERNAME}
-WORKDIR /home/${USERNAME}
-
-# Fix issue where gpg keys try to use IPV6 but docker only has IPV4, occurs
-# nondeterministically on `apt-key adv`. Provide `--homedir ~/.gnupg` to all such commands.
-# See https://github.com/f-secure-foundry/usbarmory-debian-base_image/issues/9#issuecomment-451635505
-RUN mkdir ~/.gnupg && echo "disable-ipv6" >> ~/.gnupg/dirmngr.conf
+RUN chsh -s /usr/bin/zsh
 
 # Install zsh plugins
 RUN sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
@@ -65,4 +53,3 @@ COPY --chown=${USERNAME}:${USERNAME} .zshrc .p10k.zsh /home/${USERNAME}/
 # Let zsh fetch whatever it needs the first time
 RUN [ "/usr/bin/zsh", "-c", "echo Ran zsh for first time!" ]
 ENTRYPOINT [ "/usr/bin/zsh" ]
-
